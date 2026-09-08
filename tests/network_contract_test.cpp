@@ -22,6 +22,10 @@ volatile std::sig_atomic_t sigpipes = 0;
 void onSigpipe(int) { sigpipes = 1; }
 #endif
 void exercise(bool tls) {
+  const auto phase = [tls](const char *name) {
+    std::cerr << (tls ? "HTTPS: " : "HTTP: ") << name << std::endl;
+  };
+  phase("start and exclusive bind");
   RTT::TaskContext controller(tls ? "secure" : "plain");
   int value = 17;
   controller.addProperty("value", value);
@@ -56,19 +60,23 @@ void exercise(bool tls) {
 #endif
   browser.set_keep_alive(true);
   browser.set_read_timeout(2);
+  phase("initial keep-alive request");
   auto response = browser.Get("/api/v1/components");
   require(response && response->status == 200,
           "HTTP(S) remains usable after bind failure");
   // The completed keep-alive exchange proves the sole worker owns this
   // connection. Another accepted socket is queued; excess sockets are rejected.
   std::vector<std::unique_ptr<RawClient>> waiting;
+  phase("queue overflow behind keep-alive connection");
   for (int i = 0; i != 4; ++i) {
     waiting.push_back(std::make_unique<RawClient>(port));
   }
   require(waiting.back()->disconnected(),
           "bounded queue rejects excess connections");
   auto before = std::chrono::steady_clock::now();
+  phase("stop with keep-alive and queued sockets");
   server.stop();
+  phase("keep-alive cleanup joined");
   require(std::chrono::steady_clock::now() - before < std::chrono::seconds(2),
           "stop interrupts keep-alive and disposes queued sockets without "
           "timeout waits");
@@ -78,11 +86,13 @@ void exercise(bool tls) {
   waiting.clear();
   require(server.state() == "Stopped", "network joins before Stopped");
   require(server.start(options, &error), error.c_str());
+  phase("request after same-port restart");
   response = browser.Get("/api/v1/components/" + controller.getName() +
                          "/properties/value");
   require(response && response->status == 200,
           "same-port restart preserves publication");
   browser.stop();
+  phase("queue overflow behind stalled header or TLS handshake");
   // With no completed HTTP/TLS exchange these clients stall either in header
   // reading or TLS handshake. Queue rejection proves the accept loop reached
   // them before stop; shutdown must not perform queued TLS handshakes.
@@ -92,23 +102,28 @@ void exercise(bool tls) {
   require(waiting.back()->disconnected(),
           "stalled clients exhaust bounded admission");
   before = std::chrono::steady_clock::now();
+  phase("stop with stalled sockets");
   server.stop();
+  phase("stalled socket cleanup joined");
   require(std::chrono::steady_clock::now() - before < std::chrono::seconds(2),
           "grace interrupts stalled headers/TLS handshakes");
   for (auto &client : waiting) {
     require(client->disconnected(), "stalled connection closes");
   }
   if (tls) {
+    phase("recover invalid TLS configuration");
     options.privateKeyFile = "missing-test-key.pem";
     require(!server.start(options) && server.state() == "Stopped",
             "invalid TLS configuration is recoverable");
     options.privateKeyFile = "test.key";
   }
   require(server.start(options, &error), error.c_str());
+  phase("request after recovery");
   response = browser.Get("/api/v1/components");
   require(response && response->status == 200,
           "recovery leaves HTTP(S) usable");
   server.finishShutdown();
+  phase("final shutdown joined");
 }
 } // namespace
 
