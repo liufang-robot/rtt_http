@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package>
+  <name>rtt_http</name>
+  <version>0.1.0</version>
+  <description>HTTP REST publication and JSON codec SDK for Orocos RTT components.</description>
+  <maintainer email="liufang-robot@users.noreply.github.com">liufang-robot</maintainer>
+  <license>LGPL-2.1-or-later</license>
+  <buildtool_depend>cmake</buildtool_depend>
+  <build_depend>rtt</build_depend>
+  <build_depend>cpp-httplib</build_depend>
+  <build_depend>boost</build_depend>
+  <build_depend>openssl</build_depend>
+  <run_depend>rtt</run_depend>
+  <run_depend>boost</run_depend>
+  <run_depend>openssl</run_depend>
+  <export><build_type>cmake</build_type></export>
+</package>

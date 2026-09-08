@@ -1,0 +1,6 @@
+/build*/
+/install*/
+/.pixi/
+/pixi.lock
+/orocos.log
+/.ci-dependencies/

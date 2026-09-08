@@ -1,0 +1,94 @@
+name: Native HTTP SDK
+on:
+  pull_request:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-http-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  contracts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.ci-dependencies/vcpkg-cache
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: liufang-robot/cpp-httplib
+          ref: b4454c6625985363f5176bb295225fef6fe9796b
+          path: .ci-dependencies/cpp-httplib
+          persist-credentials: false
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+        with:
+          arch: x64
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        if: runner.os == 'Windows'
+        with:
+          repository: microsoft/vcpkg
+          ref: c5a15727ee70fddf0296f0d8aafc3f58916fefac
+          path: .ci-dependencies/vcpkg
+          persist-credentials: false
+      - uses: actions/cache/restore@v4
+        if: runner.os == 'Windows'
+        id: vcpkg-cache
+        with:
+          path: .ci-dependencies/vcpkg-cache
+          key: http-vcpkg-windows-2022-c5a15727ee70fddf0296f0d8aafc3f58916fefac-v1
+      - name: Add HTTP dependencies at the released SDK vcpkg baseline
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          & ./.ci-dependencies/vcpkg/bootstrap-vcpkg.bat -disableMetrics
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./.ci-dependencies/vcpkg/vcpkg.exe install boost-json:x64-windows openssl:x64-windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/cache/save@v4
+        if: runner.os == 'Windows' && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        with:
+          path: .ci-dependencies/vcpkg-cache
+          key: http-vcpkg-windows-2022-c5a15727ee70fddf0296f0d8aafc3f58916fefac-v1
+      - uses: prefix-dev/setup-pixi@f00437f565399d418b0acc85936d12c1fb668347
+        with:
+          pixi-version: v0.76.2
+          locked: false
+          cache: false
+      - name: Install proxy test executable
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y nginx-light
+      - name: Configure against released RTT SDK
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        run: >-
+          pixi run ci-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install
+          -DRTT_HTTP_HTTPLIB_INCLUDE_DIR=${{ github.workspace }}/.ci-dependencies/cpp-httplib
+          -DRTT_HTTP_TEST_NGINX=${{ runner.os == 'Linux' && 'ON' || 'OFF' }}
+      - name: Configure against released native Windows SDK
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        run: pixi run ci-configure
+      - name: Build native library and contracts
+        run: pixi run ci-build
+      - name: Verify JSON and REST lifetime contracts
+        run: pixi run ci-test
+      - name: Install runtime and public SDK
+        run: pixi run ci-install
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: failure()
+        with:
+          name: http-diagnostics-${{ matrix.os }}
+          if-no-files-found: ignore
+          path: |
+            build/Testing/Temporary/*.log
+            build/CMakeFiles/CMakeConfigureLog.yaml

@@ -1,0 +1,27 @@
+[workspace]
+name = "rtt-http-ci"
+channels = ["https://prefix.dev/liufang-robot/orocos", "conda-forge"]
+platforms = ["linux-64", "win-64"]
+
+[dependencies]
+orocos-dev = "==0.1.5"
+cmake = ">=3.20"
+ninja = "*"
+
+[target.linux-64.dependencies]
+cxx-compiler = "*"
+
+[target.unix.activation]
+scripts = ["tools/activate-sdk.sh"]
+
+[target.linux-64.tasks]
+ci-cmake = "cmake"
+ci-build = "cmake --build build --parallel 2"
+ci-test = "ctest --test-dir build --output-on-failure --no-tests=error"
+ci-install = "cmake --install build"
+
+[target.win.tasks]
+ci-configure = "pwsh -NoProfile -File tools/ci-windows.ps1 configure"
+ci-build = "pwsh -NoProfile -File tools/ci-windows.ps1 build"
+ci-test = "pwsh -NoProfile -File tools/ci-windows.ps1 test"
+ci-install = "pwsh -NoProfile -File tools/ci-windows.ps1 install"

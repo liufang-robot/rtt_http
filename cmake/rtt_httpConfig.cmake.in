@@ -1,0 +1,13 @@
+@PACKAGE_INIT@
+include(CMakeFindDependencyMacro)
+find_dependency(OROCOS-RTT)
+find_dependency(Boost 1.84 COMPONENTS json)
+if(NOT OROCOS_TARGET STREQUAL "@OROCOS_TARGET@")
+  set(rtt_http_FOUND FALSE)
+  set(rtt_http_NOT_FOUND_MESSAGE "The HTTP SDK was built for @OROCOS_TARGET@")
+  return()
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/rtt_httpTargets.cmake")
+set_property(TARGET rtt_http::rtt_http APPEND PROPERTY
+  INTERFACE_INCLUDE_DIRECTORIES "${OROCOS-RTT_INCLUDE_DIRS}")
+check_required_components(rtt_http)
