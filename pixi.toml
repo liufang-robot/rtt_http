@@ -16,8 +16,12 @@ scripts = ["tools/activate-sdk.sh"]
 
 [target.linux-64.tasks]
 ci-cmake = "cmake"
-ci-ctest = "ctest"
+ci-build = "cmake --build build --parallel 2"
+ci-test = "ctest --test-dir build --output-on-failure --no-tests=error"
+ci-install = "cmake --install build"
 
 [target.win.tasks]
-ci-cmake = "pwsh -NoProfile -File tools/ci-command.ps1 cmake"
-ci-ctest = "pwsh -NoProfile -File tools/ci-command.ps1 ctest"
+ci-configure = "pwsh -NoProfile -File tools/ci-windows.ps1 configure"
+ci-build = "pwsh -NoProfile -File tools/ci-windows.ps1 build"
+ci-test = "pwsh -NoProfile -File tools/ci-windows.ps1 test"
+ci-install = "pwsh -NoProfile -File tools/ci-windows.ps1 install"
