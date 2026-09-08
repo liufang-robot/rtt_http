@@ -33,7 +33,7 @@ jobs:
         with:
           pixi-version: v0.76.2
           locked: false
-          cache: true
+          cache: false
       - name: Configure against released RTT SDK
         run: >-
           pixi run cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
