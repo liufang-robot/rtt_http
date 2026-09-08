@@ -34,6 +34,15 @@ public:
 
 private:
   class Impl;
+#if defined(_MSC_VER)
+  // Impl construction and destruction stay in this DLL; unique_ptr itself
+  // is header-defined and has no separately exported DLL interface.
+#pragma warning(push)
+#pragma warning(disable : 4251)
+#endif
   std::unique_ptr<Impl> impl_;
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 };
 } // namespace RTT::http

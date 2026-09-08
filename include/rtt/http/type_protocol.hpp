@@ -70,8 +70,17 @@ public:
 
 private:
   TypeRegistration registration_;
+#if defined(_MSC_VER)
+  // Private template storage uses the SDK's shared CRT. Keep the polymorphic
+  // class exported so protocol RTTI works across transport plugin DLLs.
+#pragma warning(push)
+#pragma warning(disable : 4251)
+#endif
   std::string fingerprint_;
   std::shared_ptr<const TypeCodec> codec_;
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 };
 
 struct TypeBinding {
@@ -88,8 +97,16 @@ public:
 private:
   friend RTT_HTTP_API std::shared_ptr<const TypeCatalog>
   freezeTypeCatalog(std::string *);
+#if defined(_MSC_VER)
+  // These private containers use the same C++ SDK and shared CRT as RTT.
+#pragma warning(push)
+#pragma warning(disable : 4251)
+#endif
   std::map<std::string, TypeBinding> types_;
   std::map<const RTT::types::TypeInfo *, std::string> identities_;
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 };
 
 RTT_HTTP_API bool registerTypeProtocol(RTT::types::TypeInfo *type,

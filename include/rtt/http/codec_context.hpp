@@ -52,7 +52,16 @@ public:
 
 private:
   JsonLimits limits_;
+#if defined(_MSC_VER)
+  // This C++ SDK requires the same Boost and shared CRT as its consumers.
+  // storage_ptr is header-defined; it has no separate DLL interface to export.
+#pragma warning(push)
+#pragma warning(disable : 4251)
+#endif
   boost::json::storage_ptr storage_;
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
   std::size_t depth_{0};
   std::size_t remaining_;
 };

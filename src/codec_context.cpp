@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include <rtt/http/codec_context.hpp>
 
+#include <boost/container/pmr/memory_resource.hpp>
 #include <boost/json/basic_parser.hpp>
 #include <boost/json/basic_parser_impl.hpp>
 #include <boost/json/parser.hpp>
 #include <boost/json/serializer.hpp>
+#include <boost/system/error_code.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -19,7 +21,7 @@ namespace RTT::http {
 namespace {
 class BudgetExceeded final : public std::bad_alloc {};
 
-class BudgetResource final : public boost::json::memory_resource {
+class BudgetResource final : public boost::container::pmr::memory_resource {
 public:
   explicit BudgetResource(std::size_t limit) : limit_(limit) {}
 
@@ -45,7 +47,7 @@ private:
     used_.fetch_sub(bytes, std::memory_order_relaxed);
   }
   bool do_is_equal(
-      const boost::json::memory_resource &other) const noexcept override {
+      const boost::container::pmr::memory_resource &other) const noexcept override {
     return this == &other;
   }
   std::size_t limit_;
@@ -72,7 +74,7 @@ private:
   boost::json::storage_ptr storage_;
 };
 
-using boost::json::error_code;
+using boost::system::error_code;
 using boost::json::string_view;
 
 // Validate duplicate decoded keys before a DOM can replace them. Continue
