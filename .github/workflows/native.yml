@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: liufang-robot/cpp-httplib
-          ref: da905e2a81514462e34444b092080e239d5e9d50
+          ref: b4454c6625985363f5176bb295225fef6fe9796b
           path: .ci-dependencies/cpp-httplib
           persist-credentials: false
       - uses: ilammy/msvc-dev-cmd@v1
