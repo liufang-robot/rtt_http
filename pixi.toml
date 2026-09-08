@@ -14,5 +14,10 @@ cxx-compiler = "*"
 [target.unix.activation]
 scripts = ["tools/activate-sdk.sh"]
 
-[target.win.activation]
-scripts = ["tools/activate-sdk.ps1"]
+[target.linux-64.tasks]
+ci-cmake = "cmake"
+ci-ctest = "ctest"
+
+[target.win.tasks]
+ci-cmake = "pwsh -NoProfile -File tools/ci-command.ps1 cmake"
+ci-ctest = "pwsh -NoProfile -File tools/ci-command.ps1 ctest"

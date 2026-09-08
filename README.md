@@ -21,10 +21,10 @@ ctest --test-dir build --output-on-failure
 cmake --install build
 ```
 
-The reviewed dependency is `liufang-robot/cpp-httplib` at
-`c478e5be729840c313d76e3ea8c9a6b304f7892b` (upstream v0.54.1 plus owned socket
-and SIGPIPE policy support). Configuration requires its capability markers;
-the build enables the ownership and signal opt-out automatically. The header
+The maintained dependency is `liufang-robot/cpp-httplib` (upstream v0.54.1 plus
+owned sockets, SIGPIPE policy, and exact request routing). The native workflow
+records the tested immutable revision. Configuration requires all four capability
+markers; the build enables ownership, signal opt-out, and raw routing automatically. The header
 is private to the HTTP implementation. Public SDK consumers link the shared
 `rtt_http::rtt_http` target or use `rtt_http-${OROCOS_TARGET}` pkg-config metadata.
 
@@ -60,6 +60,22 @@ distinct. Empty and dot-only names are rejected at publication because browsers
 cannot reliably address them as named resources. Reverse proxies must preserve
 the original encoded path; arbitrary proxy normalization is unsupported.
 
+The Linux proxy contract test exercises Nginx with this location inside the
+frontend's server block. `$request_uri` preserves the original encoded URI;
+do not replace it with normalized `$uri` or add name-rewriting rules.
+
+```nginx
+location /api/ {
+    proxy_pass http://127.0.0.1:8080$request_uri;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+}
+```
+
+Configure with `RTT_HTTP_TEST_NGINX=ON` to run this proof locally. The fixture
+starts its own loopback proxy and tests distinct slash, percent, Unicode, plus,
+and encoded-hash names for both reads and writes.
+
 Custom typekits and components continue to depend only on RTT. A separate HTTP
 transport registers `TypeProtocol` codecs in project-local RTT slot 1043. JSON
 uses exact decimal strings for 64-bit integers, underlying integers for enums,
@@ -76,6 +92,9 @@ reflection/type lookups would reacquire it. The callback can use its supplied
 first start supplies value support where metadata is complete; typed port
 sampling requires the companion transport. Registration freezes before the
 first bind attempt and remains frozen after bind failure and restart.
+Do not register codecs in a plugin metadata getter. A plugin must remain loaded
+once it has installed callbacks, even if another codec cannot be registered;
+report unsupported mappings without throwing out of its load entry point.
 
 Distribution integration and native platform validation remain delivery gates;
 this package is not yet an installed distribution feature.

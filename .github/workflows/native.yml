@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: liufang-robot/cpp-httplib
-          ref: c478e5be729840c313d76e3ea8c9a6b304f7892b
+          ref: e973f36d7474904bab44067c6fa18b83e639d72b
           path: .ci-dependencies/cpp-httplib
           persist-credentials: false
       - uses: ilammy/msvc-dev-cmd@v1
@@ -34,17 +34,22 @@ jobs:
           pixi-version: v0.76.2
           locked: false
           cache: false
+      - name: Install proxy test executable
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y nginx-light
       - name: Configure against released RTT SDK
+        timeout-minutes: 5
         run: >-
-          pixi run cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          pixi run ci-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install
           -DRTT_HTTP_HTTPLIB_INCLUDE_DIR=${{ github.workspace }}/.ci-dependencies/cpp-httplib
+          -DRTT_HTTP_TEST_NGINX=${{ runner.os == 'Linux' && 'ON' || 'OFF' }}
       - name: Build native library and contracts
-        run: pixi run cmake --build build --parallel 2
+        run: pixi run ci-cmake --build build --parallel 2
       - name: Verify JSON and REST lifetime contracts
-        run: pixi run ctest --test-dir build --output-on-failure
+        run: pixi run ci-ctest --test-dir build --output-on-failure
       - name: Install runtime and public SDK
-        run: pixi run cmake --install build
+        run: pixi run ci-cmake --install build
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: failure()
         with:

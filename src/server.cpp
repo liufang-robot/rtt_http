@@ -12,7 +12,8 @@
 
 #if CPPHTTPLIB_SERVER_CONNECTION_SUPPORT != 1 ||                               \
     CPPHTTPLIB_SIGPIPE_POLICY_SUPPORT != 1 ||                                  \
-    CPPHTTPLIB_OWNED_LISTENER_SUPPORT != 1
+    CPPHTTPLIB_OWNED_LISTENER_SUPPORT != 1 ||                                  \
+    CPPHTTPLIB_RAW_ROUTING_SUPPORT != 1
 #error The maintained cpp-httplib server ownership and SIGPIPE capabilities are required
 #endif
 #if defined(CPPHTTPLIB_ZLIB_SUPPORT) || defined(CPPHTTPLIB_BROTLI_SUPPORT) ||  \

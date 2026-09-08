@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
+#include "raw_client.hpp"
 #include <boost/json.hpp>
 #include <condition_variable>
 #include <future>
@@ -36,9 +37,10 @@ public:
     ports()->addPort(output);
     ports()->addPort(volatileOutput);
     ports()->addPort(input);
+    std::size_t index = 0;
     for (const char *name : {"motion/raw", "motion%2Fraw", "axes+\xc3\xa4"}) {
       RTT::Service::shared_ptr service(new RTT::Service(name, this));
-      service->addProperty("speed", speed);
+      service->addProperty("speed", nestedSpeed[index++]);
       provides()->addService(service);
     }
     addOperation("increment", &Controller::increment, this, RTT::ClientThread)
@@ -80,6 +82,7 @@ public:
     wake.notify_all();
   }
   double speed{1.5};
+  double nestedSpeed[3]{11.0, 22.0, 33.0};
   std::string label{"controller"};
   Unsupported unsupported;
   int count{0};
@@ -153,11 +156,30 @@ int main() {
             1,
         "only explicitly published component appears");
     status(browser.Get("/api/v1/components/Deployer"), 404);
+    for (const char *name : {"", ".", ".."}) {
+      RTT::TaskContext invalid("unaddressable");
+      RTT::Service::shared_ptr service(new RTT::Service(name, &invalid));
+      service->addProperty("speed", controller.speed);
+      invalid.provides()->addService(service);
+      require(!server.publishComponent(invalid),
+              "empty/dot-only names reject whole publication");
+      status(browser.Get("/api/v1/components/unaddressable"), 404);
+    }
+    std::size_t index = 0;
     for (const char *name :
          {"motion%2Fraw", "motion%252Fraw", "axes%2B%C3%A4"}) {
-      status(browser.Get(std::string("/api/v1/components/arm/services/") +
-                         name + "/properties/speed"),
-             200);
+      const auto path = std::string("/api/v1/components/arm/services/") + name +
+                        "/properties/speed";
+      require(json(browser.Get(path)).at("value") ==
+                  controller.nestedSpeed[index],
+              "encoded names address distinct RTT members");
+      status(browser.Put(path,
+                         "{\"value\":" + std::to_string(100 + index) + "}",
+                         "application/json"),
+             204);
+      require(controller.nestedSpeed[index] == 100 + index,
+              "write reaches the named service");
+      ++index;
     }
     status(browser.Get("/api/v1/components/arm/services/motion/raw"), 404);
     status(browser.Get("/api/v1/components/arm/services/bad%ZZ"), 400);
@@ -167,6 +189,21 @@ int main() {
             observer, RTT::ConnPolicy::data(RTT::ConnPolicy::LOCK_FREE, false)),
         "independent output reader");
     const std::string speed = "/api/v1/components/arm/properties/speed";
+    for (const auto &request :
+         {std::string("PUT ") + speed +
+              "#fragment HTTP/1.1\r\nHost: localhost\r\nConnection: "
+              "close\r\nContent-Type: application/json\r\nContent-Length: "
+              "12\r\n\r\n{\"value\":99}",
+          std::string("FROB ") + speed +
+              " HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"}) {
+      RawClient raw(port);
+      raw.send(request);
+      const auto wire = raw.receive();
+      require(wire.starts_with(request.starts_with("PUT") ? "HTTP/1.1 400"
+                                                          : "HTTP/1.1 405"),
+              "raw malformed targets and extension methods respect resource "
+              "policy");
+    }
     require(json(browser.Get(speed)).at("value") == 1.5, "live property read");
     status(browser.Put(speed, "{\"value\":3.25}",
                        "application/json; charset=UTF-8"),

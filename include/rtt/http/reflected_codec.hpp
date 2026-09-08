@@ -16,6 +16,9 @@ using RetainedSampleReader = std::function<PortValueStatus(
 // even typed DataSource metadata may acquire that lock: prepare these codecs
 // outside registerTransport(), after importing ordinary typekits, and make
 // callbacks use their supplied TypeInfo pointer and the prepared registration.
+// Plugin metadata getters must not perform registration. Once a DSO has
+// registered callbacks, retain it even if another codec cannot be prepared;
+// do not throw out of its load entry point and let the loader unload it.
 RTT_HTTP_API std::unique_ptr<TypeProtocol>
 makeReflectedTypeProtocol(RTT::types::TypeInfo *type, TypeRegistration identity,
                           RetainedSampleReader reader = {},
