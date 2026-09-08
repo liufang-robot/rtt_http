@@ -41,9 +41,9 @@ public:
       offset += static_cast<std::size_t>(size);
     }
   }
-  bool disconnected() {
+  bool disconnected(time_t timeout_seconds = 2) {
     char byte;
-    return httplib::detail::select_read(socket_, 2, 0) > 0 &&
+    return httplib::detail::select_read(socket_, timeout_seconds, 0) > 0 &&
            httplib::detail::read_socket(socket_, &byte, 1, 0) <= 0;
   }
   std::string receive() {

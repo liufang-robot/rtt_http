@@ -6,6 +6,7 @@
 #include <rtt/TaskContext.hpp>
 #include <rtt/http/server.hpp>
 #include <rtt/typekit/RealTimeTypekit.hpp>
+#include <thread>
 #include <vector>
 #ifndef _WIN32
 #include <csignal>
@@ -16,6 +17,18 @@ void require(bool value, const char *message) {
   if (!value) {
     throw std::runtime_error(message);
   }
+}
+bool rejectedConnection(const std::vector<std::unique_ptr<RawClient>> &clients) {
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  do {
+    for (const auto &client : clients) {
+      if (client->disconnected(0)) {
+        return true;
+      }
+    }
+    std::this_thread::yield();
+  } while (std::chrono::steady_clock::now() < deadline);
+  return false;
 }
 #ifndef _WIN32
 volatile std::sig_atomic_t sigpipes = 0;
@@ -71,7 +84,7 @@ void exercise(bool tls) {
   for (int i = 0; i != 4; ++i) {
     waiting.push_back(std::make_unique<RawClient>(port));
   }
-  require(waiting.back()->disconnected(),
+  require(rejectedConnection(waiting),
           "bounded queue rejects excess connections");
   auto before = std::chrono::steady_clock::now();
   phase("stop with keep-alive and queued sockets");
@@ -99,7 +112,9 @@ void exercise(bool tls) {
   for (int i = 0; i != 4; ++i) {
     waiting.push_back(std::make_unique<RawClient>(port));
   }
-  require(waiting.back()->disconnected(),
+  // Worker handoff can race client arrival, so rejection need not occur on
+  // the last socket. At most one active and one queued socket can survive.
+  require(rejectedConnection(waiting),
           "stalled clients exhaust bounded admission");
   before = std::chrono::steady_clock::now();
   phase("stop with stalled sockets");
