@@ -1,0 +1,10 @@
+prefix=${pcfiledir}/../..
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@/orocos
+
+Name: rtt_http-@OROCOS_TARGET@
+Description: Orocos RTT HTTP service and JSON codec SDK
+Version: @PROJECT_VERSION@
+Requires: orocos-rtt-@OROCOS_TARGET@
+Libs: -L${libdir} -lorocos-rtt-http-@OROCOS_TARGET@ -lboost_json
+Cflags: -I${includedir} -DOROCOS_TARGET=@OROCOS_TARGET@
