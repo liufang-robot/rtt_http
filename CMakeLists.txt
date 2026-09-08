@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 project(rtt_http VERSION 0.1.0 LANGUAGES CXX)
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 find_package(OROCOS-RTT REQUIRED)
 find_package(Boost 1.84 REQUIRED COMPONENTS json)
 find_package(Threads REQUIRED)
@@ -52,6 +56,9 @@ if(RTT_HTTP_TLS)
   target_link_libraries(rtt_http PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 endif()
 if(WIN32)
+  # cpp-httplib requires Windows 10. Define this before RTT/Boost can select
+  # their older default, consistently for this SDK and its consumers.
+  target_compile_definitions(rtt_http PUBLIC _WIN32_WINNT=0x0A00 WINVER=0x0A00)
   target_link_libraries(rtt_http PRIVATE ws2_32 crypt32)
 else()
   target_compile_definitions(rtt_http PRIVATE CPPHTTPLIB_SEND_FLAGS=MSG_NOSIGNAL)
