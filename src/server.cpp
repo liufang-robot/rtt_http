@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
+// Include before RTT headers, whose Xenomai backend defines a read_lock macro.
+#include <httplib.h>
+
 #include "object_model.hpp"
 #include "operation_executor.hpp"
 #include <algorithm>
 #include <charconv>
 #include <climits>
-#include <httplib.h>
 #include <limits>
 #include <rtt/base/OutputPortInterface.hpp>
 #include <rtt/http/reflected_codec.hpp>
