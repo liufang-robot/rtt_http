@@ -4,7 +4,7 @@ $ErrorActionPreference = "Stop"
 $repository = Split-Path -Parent $PSScriptRoot
 $build = Join-Path $repository "build"
 # v0.1.5 predates HTTP. Supplement its SDK using the same pinned vcpkg/Boost
-# baseline, keeping its RTT and existing Boost runtime versions unchanged.
+# baseline. The cyclic RTT build is selected by activate-sdk.ps1.
 $httpDependencies = Join-Path $repository ".ci-dependencies/vcpkg/installed/x64-windows"
 $env:CMAKE_PREFIX_PATH = "$env:CMAKE_PREFIX_PATH;$httpDependencies"
 $env:PATH = "$httpDependencies/bin;$env:PATH"
