@@ -1,7 +1,9 @@
+#include <rtt/internal/PortDataAccess.hpp>
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "raw_client.hpp"
 #include <boost/json.hpp>
 #include <condition_variable>
+#include <atomic>
 #include <future>
 #include <httplib.h>
 #include <iostream>
@@ -26,8 +28,8 @@ struct Unsupported {
 class Controller : public RTT::TaskContext {
 public:
   Controller()
-      : RTT::TaskContext("arm"), output("position", true),
-        volatileOutput("volatile", false), input("target") {
+      : RTT::TaskContext("arm"), output("position"),
+        volatileOutput("volatile"), input("target") {
     setActivity(new RTT::Activity(ORO_SCHED_OTHER, 0, 0.0));
     addProperty("speed", speed);
     addProperty("label", label);
@@ -76,9 +78,17 @@ public:
     value += 9;
     return value;
   }
+  void updateHook() override {
+    if (!pauseCycle.load()) return;
+    std::unique_lock lock(mutex);
+    cycleEntered = true;
+    wake.notify_all();
+    wake.wait(lock, [&] { return cycleReleased; });
+  }
   void release() {
     std::lock_guard lock(mutex);
     released = true;
+    cycleReleased = true;
     wake.notify_all();
   }
   double speed{1.5};
@@ -93,6 +103,8 @@ public:
   std::mutex mutex;
   std::condition_variable wake;
   bool entered{false}, released{false};
+  std::atomic<bool> pauseCycle{false};
+  bool cycleEntered{false}, cycleReleased{false};
 };
 boost::json::value json(const httplib::Result &response, int expected = 200) {
   require(response && response->status == expected,
@@ -264,28 +276,54 @@ int main() {
     status(failed, 500);
     require(failed->body.find("private exception") == std::string::npos,
             "operation exceptions are sanitized");
+    require(controller.recover(), "recover after the deliberately failing operation");
     status(browser.Post(operation("increment"), "{\"arguments\":[]}",
                         "application/json"),
            422);
     require(json(browser.Get("/api/v1/components/arm/ports/position/latest"))
                     .at("hasSample") == false,
             "initial sample is absent");
-    require(controller.output.write(12.0) == RTT::WriteSuccess,
+    require(RTT::internal::PortDataAccess::publish(controller.output, 12.0) == RTT::WriteSuccess,
             "publish output sample");
     for (int i = 0; i < 2; ++i) {
       require(json(browser.Get("/api/v1/components/arm/ports/position/latest"))
                       .at("value") == 12.0,
               "retained output is repeatable");
     }
+    controller.output.data() = 99.0;
+    require(json(browser.Get("/api/v1/components/arm/ports/position/latest"))
+                    .at("value") == 12.0,
+            "HTTP cannot observe an uncommitted output image");
     double sample = 0;
-    require(observer.read(sample) == RTT::NewData && sample == 12.0,
+    require(RTT::internal::PortDataAccess::receive(observer, sample) == RTT::NewData && sample == 12.0,
             "HTTP leaves another reader's data intact");
-    status(browser.Get("/api/v1/components/arm/ports/volatile/latest"), 404);
+    require(json(browser.Get("/api/v1/components/arm/ports/volatile/latest"))
+                    .at("hasSample") == false,
+            "every output exposes a committed snapshot");
+    controller.pauseCycle = true;
+    require(controller.start(), "start component before network ingress");
+    require(controller.getActivity()->trigger(), "trigger paused component cycle");
+    {
+      std::unique_lock lock(controller.mutex);
+      require(controller.wake.wait_for(lock, std::chrono::seconds(2), [&] {
+                return controller.cycleEntered;
+              }), "component hook entered before HTTP ingress");
+    }
     status(browser.Post("/api/v1/components/arm/ports/target/samples",
                         "{\"value\":18}", "application/json"),
            204);
-    require(controller.input.read(sample) == RTT::NewData && sample == 18.0,
-            "HTTP bridge delivers one sample");
+    require(controller.input.data() == 0.0,
+            "HTTP ingress stages data without changing the input image");
+    {
+      std::lock_guard lock(controller.mutex);
+      controller.pauseCycle = false;
+      controller.cycleReleased = true;
+      controller.wake.notify_all();
+    }
+    require(controller.stop(), "stop component for explicit test acquisition");
+    require(RTT::internal::PortDataAccess::refresh(controller.input) == RTT::NewData &&
+                controller.input.data() == 18.0,
+            "cycle acquisition delivers the staged HTTP sample");
     controller.input.disconnect();
     status(browser.Post("/api/v1/components/arm/ports/target/samples",
                         "{\"value\":19}", "application/json"),

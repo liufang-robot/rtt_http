@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // Include before RTT headers, whose Xenomai backend defines a read_lock macro.
 #include <httplib.h>
+#include <rtt/internal/PortDataAccess.hpp>
 
 #include "object_model.hpp"
 #include "operation_executor.hpp"
@@ -530,7 +531,9 @@ void Server::Impl::handle(const httplib::Request &request,
         problem(request, response, 500);
         return;
       }
-      switch (port->write(staged)) {
+      // Publish through the transport-owned anti-port. The component input
+      // image is acquired only at its owner's next cycle boundary.
+      switch (RTT::internal::PortDataAccess::publish(*port, staged)) {
       case RTT::WriteSuccess:
         response.status = 204;
         break;

@@ -375,7 +375,7 @@ boost::json::object ObjectModel::describeService(
         const auto *binding = catalog_->find(type);
         const bool supported =
             binding && (!output || binding->codec->supportsPortValue());
-        const bool retains = output && output->keepsLastWrittenValue();
+        const bool retains = output != nullptr;
         auto metadata = summary(memberName, port->getDescription(), base);
         metadata.erase("href");
         metadata["rttType"] = typeName(type);

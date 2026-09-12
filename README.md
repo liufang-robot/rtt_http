@@ -39,9 +39,11 @@ until that final cleanup completes.
 REST collections start at `/api/v1/components`. Component and nested service
 descriptions list properties, attributes, operations, and ports with canonical
 RTT type schemas. GET reads a value, PUT replaces a writable value, and POST
-invokes an operation or delivers one input sample. Output reads use retained
-RTT samples; non-retaining outputs have no latest-value route. Multiple clients
-can read independently. Request and response limits are enforced without
+invokes an operation or stages one input sample in a transport channel. The
+component acquires that sample at its next cyclic input boundary. Every output
+exposes a latest-value route backed by its committed snapshot; edits to an output
+working image remain invisible until the component completes a successful cycle.
+Multiple clients can read independently. RTT 3.0 or newer is required. Request and response limits are enforced without
 truncating values.
 
 Operation timeouts return 504 without cancellation or replay. Admitted calls

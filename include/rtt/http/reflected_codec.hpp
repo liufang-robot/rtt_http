@@ -45,7 +45,7 @@ makeReflectedTypeProtocol(RTT::types::TypeInfo *type, TypeRegistration identity,
           return PortValueStatus::error;
         }
         T value{};
-        if (!typed->getLastWrittenValue(value)) {
+        if (!typed->snapshot(value)) {
           return PortValueStatus::waiting_for_initial_data;
         }
         // Use the reference assignment path to preserve every string byte.
