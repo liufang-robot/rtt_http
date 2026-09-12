@@ -14,6 +14,10 @@ Build against a compatible RTT prefix, Boost.JSON 1.84 or later, and the
 maintained cpp-httplib header. HTTPS uses OpenSSL by default and can be disabled
 at build time with `RTT_HTTP_TLS=OFF`.
 
+The native CI workflow builds the matching RTT 3 feature branch before HTTP.
+The released development SDK supplies third-party dependencies; cyclic RTT
+headers, libraries, and plugins are selected from the isolated CI install.
+
 ```sh
 cmake -S . -B build -DRTT_HTTP_HTTPLIB_INCLUDE_DIR=/path/to/patched/cpp-httplib
 cmake --build build --parallel 2
