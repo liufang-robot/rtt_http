@@ -1,3 +1,4 @@
+#include <rtt/internal/PortDataAccess.hpp>
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include <rtt/InputPort.hpp>
 #include <rtt/http/typed_codec.hpp>
@@ -214,7 +215,7 @@ int main(int argc, char **argv) {
     require(integer.portValue(&output, &sample, context, nullptr) ==
                 PortValueStatus::waiting_for_initial_data,
             "no invented initial sample");
-    output.write(23);
+    RTT::internal::PortDataAccess::publish(output, 23);
     require(integer.portValue(&output, &sample, context, nullptr) ==
                     PortValueStatus::value &&
                 sample == 23,
@@ -224,7 +225,7 @@ int main(int argc, char **argv) {
                 sample == 23,
             "repeated retained reads are non-consuming");
     std::int32_t observed{};
-    require(observer.read(observed) == RTT::NewData && observed == 23,
+    require(RTT::internal::PortDataAccess::receive(observer, observed) == RTT::NewData && observed == 23,
             "HTTP retained reads do not consume another reader's sample");
     std::cout << "RTT JSON fidelity, whole assignment, retained samples, and "
                  "registry contracts passed\n";

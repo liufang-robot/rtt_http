@@ -79,6 +79,31 @@ void sortItems(boost::json::array &items) {
            b.as_object().at("name").as_string();
   });
 }
+std::string decodeSegment(std::string_view encoded) {
+  std::string result;
+  for (std::size_t index = 0; index < encoded.size(); ++index) {
+    if (encoded[index] == '%') {
+      if (encoded.size() - index < 3 || hex(encoded[index + 1]) < 0 ||
+          hex(encoded[index + 2]) < 0) {
+        return {};
+      }
+      result += static_cast<char>(hex(encoded[index + 1]) * 16 +
+                                  hex(encoded[index + 2]));
+      index += 2;
+    } else {
+      result += encoded[index];
+    }
+  }
+  return result;
+}
+std::string endpointPath(const PublishedPort &port, const std::string &member) {
+  return member.empty() ? port.path
+                        : port.path + "/members/" + encodeSegment(member);
+}
+bool failure(std::string *error, const std::string &message) {
+  if (error) *error = message;
+  return false;
+}
 } // namespace
 
 std::string encodeSegment(std::string_view name) {
@@ -139,14 +164,6 @@ bool canonicalRequestPath(std::string_view target, std::string *path) {
   return true;
 }
 
-PortBridge::~PortBridge() {
-  if (peer) {
-    try {
-      peer->disconnect();
-    } catch (...) {
-    }
-  }
-}
 ObjectModel::ObjectModel(std::shared_ptr<const TypeCatalog> catalog,
                          std::map<std::string, std::string> diagnostics)
     : catalog_(std::move(catalog)), diagnostics_(std::move(diagnostics)) {}
@@ -373,63 +390,39 @@ boost::json::object ObjectModel::describeService(
         }
         const auto *type = port->getTypeInfo();
         const auto *binding = catalog_->find(type);
-        const bool supported =
-            binding && (!output || binding->codec->supportsPortValue());
-        const bool retains = output && output->keepsLastWrittenValue();
+        const bool supported = binding != nullptr;
         auto metadata = summary(memberName, port->getDescription(), base);
-        metadata.erase("href");
         metadata["rttType"] = typeName(type);
         metadata["direction"] = output ? "output" : "input";
-        metadata["retainsLastSample"] =
-            output ? boost::json::value(retains) : boost::json::value();
-        metadata["latestHref"] = retains ? boost::json::value(base + "/latest")
-                                         : boost::json::value();
-        metadata["samplesHref"] = input ? boost::json::value(base + "/samples")
-                                        : boost::json::value();
+        metadata["retainsLastSample"] = true;
+        metadata["latestHref"] = base + "/latest";
+        metadata["samplesHref"] = nullptr;
+        metadata["writable"] = false;
+        metadata["memberHrefTemplate"] = base + "/members/{selector}";
+        metadata["inputWrites"] = boost::json::array{};
         noteType(type);
-        noteUnsupported(metadata, base,
-                        supported ? ""
-                        : binding
-                            ? "HTTP codec has no typed retained sample reader"
-                            : unsupported(type));
-        items.push_back(std::move(metadata));
-        auto bridge = std::make_shared<PortBridge>();
-        bridge->peer.reset(port->antiClone());
-        bool connected = false;
-        if (output) {
-          auto *observer =
-              dynamic_cast<RTT::base::InputPortInterface *>(bridge->peer.get());
-          connected =
-              observer &&
-              output->createConnection(
-                  *observer,
-                  RTT::ConnPolicy::data(RTT::ConnPolicy::LOCK_FREE, false));
-        } else {
-          auto *sender = dynamic_cast<RTT::base::OutputPortInterface *>(
-              bridge->peer.get());
-          connected = sender && sender->createConnection(*input);
-        }
-        if (!connected) {
-          throw std::runtime_error(
-              "failed to construct HTTP-owned RTT port connection");
-        }
+        noteUnsupported(metadata, base, supported ? "" : unsupported(type));
+        items.push_back(metadata);
+        PublishedPort published;
+        published.endpoint.port = port;
+        published.name = memberName;
+        published.service = service;
+        published.path = base;
+        published.servicePath = path;
+        published.metadata = std::move(metadata);
+        publication.ports.emplace(base, std::move(published));
         auto resource = std::make_shared<Resource>();
         resource->binding = binding;
         resource->supported = supported;
-        resource->output = output;
-        resource->bridge = std::move(bridge);
-        resource->kind = input ? ResourceKind::samples : ResourceKind::latest;
-        if (input) {
-          resource->allow = "POST, OPTIONS";
+        if (supported) {
+          auto reader = std::make_shared<PortReader>();
+          std::string error;
+          reader->observation = RTT::PortObservation::create({port, {}}, &error);
+          if (!reader->observation) throw std::runtime_error(error);
+          resource->reader = std::move(reader);
         }
-        if (input || retains) {
-          insert(publication, base + (input ? "/samples" : "/latest"),
-                 std::move(resource));
-        } else {
-          // A non-retaining output still owns its observer for the entire
-          // publication, although it deliberately has no executable route.
-          publication.observers.push_back(std::move(resource->bridge));
-        }
+        resource->kind = ResourceKind::latest;
+        insert(publication, base + "/latest", std::move(resource));
       }
     }
     sortItems(items);
@@ -478,6 +471,168 @@ bool ObjectModel::commit(std::shared_ptr<Publication> publication,
   }
   return true;
 }
+
+std::shared_ptr<const Resource>
+ObjectModel::portResource(const PublishedPort &published,
+                          const RTT::PortEndpoint &endpoint,
+                          const std::string &suffix) const {
+  const auto *type = endpoint.getTypeInfo();
+  if (!type) return {};
+  const auto *binding = catalog_->find(type);
+  const auto enabled = published.inputs.find(endpoint.member);
+  auto resource = std::make_shared<Resource>();
+  resource->binding = binding;
+  resource->supported = binding != nullptr;
+  if (suffix == "/samples") {
+    if (enabled == published.inputs.end()) return {};
+    resource->kind = ResourceKind::samples;
+    resource->allow = "POST, OPTIONS";
+    resource->bridge = enabled->second;
+  } else if (suffix == "/latest") {
+    resource->kind = ResourceKind::latest;
+    if (binding) {
+      resource->reader = std::make_shared<PortReader>();
+      resource->reader->observation = RTT::PortObservation::create(endpoint);
+      if (!resource->reader->observation) return {};
+    }
+  } else if (suffix.empty()) {
+    const auto base = endpointPath(published, endpoint.member);
+    auto metadata = published.metadata;
+    if (!endpoint.member.empty()) {
+      metadata["name"] = endpoint.member;
+      metadata["href"] = base;
+      metadata["rttType"] = typeName(type);
+      metadata["latestHref"] = base + "/latest";
+      metadata.erase("memberHrefTemplate");
+      metadata.erase("inputWrites");
+    }
+    metadata["samplesHref"] = enabled == published.inputs.end()
+                                  ? boost::json::value()
+                                  : boost::json::value(base + "/samples");
+    metadata["writable"] = enabled != published.inputs.end();
+    metadata["jsonSupported"] = binding != nullptr;
+    metadata["reason"] = binding ? boost::json::value()
+                                  : boost::json::value(unsupported(type));
+    metadata["types"] = types({typeName(type)});
+    resource->description = std::move(metadata);
+    resource->supported = true; // Unsupported values still have metadata.
+  } else {
+    return {};
+  }
+  return resource;
+}
+
+void ObjectModel::updatePortMetadata(Publication &publication,
+                                     PublishedPort &port) const {
+  const bool whole = port.inputs.contains("");
+  port.metadata["samplesHref"] = whole
+      ? boost::json::value(port.path + "/samples") : boost::json::value();
+  port.metadata["writable"] = whole;
+  boost::json::array regions;
+  for (const auto &[member, bridge] : port.inputs) {
+    regions.push_back({{"member", member},
+                       {"rttType", typeName(bridge->source->getTypeInfo())},
+                       {"samplesHref", endpointPath(port, member) + "/samples"}});
+  }
+  port.metadata["inputWrites"] = std::move(regions);
+  for (const auto &path : {port.servicePath, port.servicePath + "/ports"}) {
+    const auto found = publication.routes.find(path);
+    if (found == publication.routes.end()) continue;
+    auto resource = std::make_shared<Resource>(*found->second);
+    auto &items = resource->description.at(path == port.servicePath
+                                              ? "ports" : "items").as_array();
+    for (auto &item : items) {
+      if (item.at("latestHref") == boost::json::value(port.path + "/latest")) {
+        item = port.metadata;
+        break;
+      }
+    }
+    found->second = std::move(resource);
+  }
+}
+
+bool ObjectModel::enableInputWrite(RTT::TaskContext &component,
+                                   const std::string &path, std::string *error) {
+  std::lock_guard lock(mutex_);
+  const auto found = publications_.find(component.getName());
+  if (found == publications_.end() || found->second->component != &component)
+    return failure(error, "input writing requires a published component");
+  RTT::PortEndpoint endpoint;
+  if (!RTT::resolvePortEndpoint(*component.provides(), path, endpoint, error))
+    return false;
+  if (!dynamic_cast<RTT::base::InputPortInterface *>(endpoint.port))
+    return failure(error, "output ports are read-only");
+  if (!endpoint.port->connectionChangeAllowed())
+    return failure(error, "input writing must be configured while stopped");
+  auto publication = std::make_shared<Publication>(*found->second);
+  for (auto &[base, port] : publication->ports) {
+    (void)base;
+    if (port.endpoint.port != endpoint.port) continue;
+    if (!catalog_->find(endpoint.getTypeInfo()))
+      return failure(error, "input endpoint has no registered HTTP JSON codec");
+    const auto previous = port.inputs.find(endpoint.member);
+    const auto old = previous == port.inputs.end() ? nullptr : previous->second;
+    if (old) {
+      std::lock_guard writer(old->writer);
+      if (old->enabled && old->source->connected()) {
+        if (error) error->clear();
+        return true;
+      }
+    }
+    auto source = RTT::PortInputSource::create(endpoint, error, "http_input");
+    if (!source) return false;
+    auto bridge = std::make_shared<PortBridge>();
+    bridge->source = std::move(source);
+    port.inputs.insert_or_assign(endpoint.member, std::move(bridge));
+    updatePortMetadata(*publication, port);
+    if (old) {
+      std::lock_guard writer(old->writer);
+      old->enabled = false;
+    }
+    found->second = std::move(publication);
+    if (error) error->clear();
+    return true;
+  }
+  return failure(error, "input endpoint is absent from the published interface");
+}
+
+bool ObjectModel::disableInputWrite(RTT::TaskContext &component,
+                                    const std::string &path, std::string *error) {
+  std::lock_guard lock(mutex_);
+  const auto found = publications_.find(component.getName());
+  if (found == publications_.end() || found->second->component != &component)
+    return failure(error, "input writing requires a published component");
+  RTT::PortEndpoint endpoint;
+  if (!RTT::resolvePortEndpoint(*component.provides(), path, endpoint, error))
+    return false;
+  if (!dynamic_cast<RTT::base::InputPortInterface *>(endpoint.port))
+    return failure(error, "output ports are read-only");
+  if (!endpoint.port->connectionChangeAllowed())
+    return failure(error, "input writing must be configured while stopped");
+  auto publication = std::make_shared<Publication>(*found->second);
+  for (auto &[base, port] : publication->ports) {
+    (void)base;
+    if (port.endpoint.port != endpoint.port) continue;
+    const auto enabled = port.inputs.find(endpoint.member);
+    if (enabled == port.inputs.end()) {
+      if (error) error->clear();
+      return true;
+    }
+    const auto bridge = enabled->second;
+    port.inputs.erase(enabled);
+    updatePortMetadata(*publication, port);
+    {
+      std::lock_guard writer(bridge->writer);
+      if (!bridge->source->disconnect(error)) return false;
+      bridge->enabled = false;
+    }
+    found->second = std::move(publication);
+    if (error) error->clear();
+    return true;
+  }
+  return failure(error, "input endpoint is absent from the published interface");
+}
+
 std::shared_ptr<const Resource>
 ObjectModel::resolve(const std::string &path) const {
   std::lock_guard lock(mutex_);
@@ -497,6 +652,27 @@ ObjectModel::resolve(const std::string &path) const {
     const auto found = publication->routes.find(path);
     if (found != publication->routes.end()) {
       return found->second;
+    }
+    for (const auto &[base, port] : publication->ports) {
+      // The publication retains its service and readers, but does not own ports.
+      // Check the captured name before dereferencing or selecting a live port.
+      if (port.service->getPort(port.name) != port.endpoint.port) continue;
+      if (path == base || path == base + "/samples") {
+        return portResource(port, port.endpoint, path.substr(base.size()));
+      }
+      const auto prefix = base + "/members/";
+      if (!path.starts_with(prefix)) continue;
+      const auto tail = path.substr(prefix.size());
+      const auto slash = tail.find('/');
+      const auto selector = decodeSegment(tail.substr(0, slash));
+      if (selector.empty()) return {};
+      const auto suffix = slash == std::string::npos ? "" : tail.substr(slash);
+      RTT::PortEndpoint endpoint;
+      const auto relative = port.name +
+          (selector.front() == '[' ? "" : ".") + selector;
+      if (!RTT::resolvePortEndpoint(*port.service, relative, endpoint) ||
+          endpoint.port != port.endpoint.port) return {};
+      return portResource(port, endpoint, suffix);
     }
   }
   return {};

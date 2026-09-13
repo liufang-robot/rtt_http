@@ -381,7 +381,7 @@ public:
       return PortValueStatus::error;
     }
     T sample{};
-    if (!typed->getLastWrittenValue(sample)) {
+    if (!typed->snapshot(sample)) {
       return PortValueStatus::waiting_for_initial_data;
     }
     boost::json::value staged(context.storage());

@@ -13,12 +13,31 @@ struct Member {
   std::shared_ptr<const TypeCodec> codec;
 };
 
+std::optional<int> sequenceSize(const RTT::types::TypeInfo *type,
+                                const DataSourcePtr &source) {
+  if (!source) return {};
+  const auto size_source = type->getMember(source, "size");
+  const auto *size = dynamic_cast<const RTT::internal::DataSource<int> *>(
+      size_source.get());
+  if (!size) return {};
+  const auto count = size->get();
+  return count < 0 ? std::optional<int>{} : std::optional<int>{count};
+}
+
+DataSourcePtr sizedSequence(const RTT::types::TypeInfo *type, int count) {
+  std::unique_ptr<RTT::base::AttributeBase> storage(type->buildVariable("", count));
+  const auto source = storage ? storage->getDataSource() : DataSourcePtr{};
+  if (!source || !source->isAssignable() || source->getTypeInfo() != type ||
+      sequenceSize(type, source) != count) return {};
+  return source;
+}
+
 class ReflectedCodec final : public TypeCodec {
 public:
-  ReflectedCodec(RTT::types::TypeInfo *type, bool sequence,
+  ReflectedCodec(RTT::types::TypeInfo *type, bool sequence, bool resizable,
                  std::optional<std::size_t> length, std::vector<Member> members,
                  RetainedSampleReader reader)
-      : type_(type), sequence_(sequence), length_(length),
+      : type_(type), sequence_(sequence), resizable_(resizable), length_(length),
         members_(std::move(members)), reader_(std::move(reader)) {}
   bool toJson(const DataSourcePtr &source, boost::json::value *result,
               CodecContext &context, CodecError *error) const override {
@@ -109,16 +128,23 @@ public:
         }
       }
     }
-    const auto staged = type_->buildValue();
+    auto staged = type_->buildValue();
     if (!staged || !staged->isAssignable()) {
       codecFailure(error, CodecErrorCode::invalid_data_source);
       return {};
     }
     if (sequence_) {
-      if (!length_ &&
-          !type_->resize(staged, static_cast<int>(value.as_array().size()))) {
-        codecFailure(error, CodecErrorCode::invalid_data_source);
-        return {};
+      const int count = static_cast<int>(value.as_array().size());
+      if (sequenceSize(type_, staged) != count) {
+        if (!type_->resize(staged, count)) {
+          // A carray wrapper cannot resize, but its value factory can allocate
+          // owned storage for a selected array sample of the requested shape.
+          staged = sizedSequence(type_, count);
+        }
+        if (!staged || sequenceSize(type_, staged) != count) {
+          codecFailure(error, CodecErrorCode::invalid_data_source);
+          return {};
+        }
       }
       std::size_t index = 0;
       for (const auto &element : value.as_array()) {
@@ -149,6 +175,21 @@ public:
         staged->getTypeInfo() != type_ || destination->getTypeInfo() != type_) {
       return codecFailure(error, CodecErrorCode::invalid_data_source);
     }
+    if (sequence_ && !resizable_) {
+      const auto count = sequenceSize(type_, staged);
+      if (!count || count != sequenceSize(type_, destination)) {
+        return codecFailure(error, CodecErrorCode::type_mismatch);
+      }
+      // Same-type carray assignment can rebind its wrapper rather than copy
+      // the backing elements. Assign the validated region through reflection.
+      for (int index = 0; index != *count; ++index) {
+        const auto name = std::to_string(index);
+        if (!members_[0].codec->assign(type_->getMember(staged, name),
+                                       type_->getMember(destination, name), error))
+          return false;
+      }
+      return true;
+    }
     if (!destination->update(staged.get())) {
       return codecFailure(error, CodecErrorCode::invalid_data_source);
     }
@@ -176,6 +217,7 @@ public:
 private:
   RTT::types::TypeInfo *type_;
   bool sequence_;
+  bool resizable_;
   std::optional<std::size_t> length_;
   std::vector<Member> members_;
   RetainedSampleReader reader_;
@@ -203,6 +245,7 @@ makeReflectedTypeProtocol(RTT::types::TypeInfo *type, TypeRegistration identity,
       type->getMember(prototype, new RTT::internal::ConstantDataSource<int>(0));
   const bool sequence = static_cast<bool>(element);
   std::optional<std::size_t> length;
+  bool resizable = false;
   std::vector<Member> members;
   std::set<std::string> dependencies;
   const auto addMember = [&](std::string name, const DataSourcePtr &value) {
@@ -228,8 +271,12 @@ makeReflectedTypeProtocol(RTT::types::TypeInfo *type, TypeRegistration identity,
     if (!size || size->get() < 0) {
       return fail("RTT sequence has no valid size metadata");
     }
-    if (!type->resize(prototype, 0)) {
+    resizable = type->resize(prototype, 0);
+    if (!resizable) {
       length = static_cast<std::size_t>(size->get());
+      // carray<T> is one wrapper type for different fixed member lengths.
+      // Its empty prototype is not a declaration that every value is empty.
+      if (*length == 0 && sizedSequence(type, 1)) length.reset();
     }
     identity.descriptor = {
         {"kind", "array"},
@@ -258,7 +305,7 @@ makeReflectedTypeProtocol(RTT::types::TypeInfo *type, TypeRegistration identity,
   }
   identity.dependencies.assign(dependencies.begin(), dependencies.end());
   auto codec = std::make_shared<ReflectedCodec>(
-      type, sequence, length, std::move(members), std::move(reader));
+      type, sequence, resizable, length, std::move(members), std::move(reader));
   if (error) {
     error->clear();
   }
