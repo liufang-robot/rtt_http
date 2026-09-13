@@ -159,6 +159,9 @@ int main() {
         "initial HTTP publication must be empty");
     status(browser.Get("/api/v1/components/arm"), 404);
     require(server.publishComponent(controller, &error), error.c_str());
+    require(!controller.input.connected() && !controller.output.connected() &&
+                !controller.volatileOutput.connected(),
+            "HTTP publication must observe ports without creating connections");
     auto discovery = json(browser.Get("/api/v1/components/arm"));
     require(discovery.at("name") == "arm" &&
                 discovery.at("types").as_object().contains("Float64"),
@@ -300,6 +303,9 @@ int main() {
     require(json(browser.Get("/api/v1/components/arm/ports/volatile/latest"))
                     .at("hasSample") == false,
             "every output exposes a committed snapshot");
+    status(browser.Post("/api/v1/components/arm/ports/target/samples",
+                        "{\"value\":18}", "application/json"), 404);
+    require(server.enableInputWrite(controller, "target", &error), error.c_str());
     controller.pauseCycle = true;
     require(controller.start(), "start component before network ingress");
     require(controller.getActivity()->trigger(), "trigger paused component cycle");

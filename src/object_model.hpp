@@ -3,6 +3,7 @@
 #include <boost/json.hpp>
 #include <mutex>
 #include <rtt/OperationInterfacePart.hpp>
+#include <rtt/PortEndpoint.hpp>
 #include <rtt/Service.hpp>
 #include <rtt/base/OperationCallerInterface.hpp>
 #include <rtt/base/PortInterface.hpp>
@@ -14,9 +15,13 @@ std::string encodeSegment(std::string_view name);
 bool canonicalRequestPath(std::string_view rawTarget, std::string *path);
 
 struct PortBridge {
-  ~PortBridge();
-  std::unique_ptr<RTT::base::PortInterface> peer;
+  std::shared_ptr<RTT::PortInputSource> source;
   std::mutex writer;
+  bool enabled{true};
+};
+struct PortReader {
+  std::shared_ptr<RTT::PortObservation> observation;
+  std::mutex mutex;
 };
 struct Operation {
   RTT::Service::shared_ptr service;
@@ -37,10 +42,19 @@ struct Resource {
   boost::json::value description;
   DataSourcePtr source;
   const TypeBinding *binding{};
-  RTT::base::OutputPortInterface *output{};
+  std::shared_ptr<PortReader> reader;
   std::shared_ptr<PortBridge> bridge;
   std::shared_ptr<Operation> operation;
   bool supported{true};
+};
+struct PublishedPort {
+  RTT::PortEndpoint endpoint;
+  std::string name;
+  RTT::Service::shared_ptr service;
+  std::string path;
+  std::string servicePath;
+  boost::json::object metadata;
+  std::map<std::string, std::shared_ptr<PortBridge>> inputs;
 };
 struct Publication {
   RTT::TaskContext *component{};
@@ -48,7 +62,7 @@ struct Publication {
   boost::json::object summary;
   std::map<std::string, std::shared_ptr<const Resource>> routes;
   std::vector<std::string> diagnostics;
-  std::vector<std::shared_ptr<PortBridge>> observers;
+  std::map<std::string, PublishedPort> ports;
 };
 class ObjectModel {
 public:
@@ -58,6 +72,9 @@ public:
   bool commit(std::shared_ptr<Publication>, std::string *error);
   std::shared_ptr<const Resource> resolve(const std::string &) const;
   bool contains(const RTT::TaskContext *) const;
+  bool enableInputWrite(RTT::TaskContext &, const std::string &, std::string *);
+  bool disableInputWrite(RTT::TaskContext &, const std::string &,
+                         std::string *);
   std::vector<std::string> diagnostics(const std::string &) const;
 
 private:
@@ -67,6 +84,10 @@ private:
                                       std::set<RTT::Service *> &,
                                       unsigned int) const;
   std::string unsupported(const RTT::types::TypeInfo *) const;
+  std::shared_ptr<const Resource> portResource(const PublishedPort &,
+                                               const RTT::PortEndpoint &,
+                                               const std::string &) const;
+  void updatePortMetadata(Publication &, PublishedPort &) const;
   std::shared_ptr<const TypeCatalog> catalog_;
   std::map<std::string, std::string> diagnostics_;
   mutable std::mutex mutex_;

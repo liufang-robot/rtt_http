@@ -36,11 +36,13 @@ public:
   virtual bool assign(const DataSourcePtr &staged,
                       const DataSourcePtr &destination,
                       CodecError *error) const = 0;
+  // Optional typed-output convenience API. Server port routes encode the
+  // shared RTT PortObservation snapshot through toJson for both directions.
   virtual PortValueStatus portValue(const RTT::base::OutputPortInterface *port,
                                     boost::json::value *result,
                                     CodecContext &context,
                                     CodecError *error) const = 0;
-  // Reflection alone cannot query typed RTT retained-sample availability.
+  // This capability applies only to the typed-output convenience API above.
   virtual bool supportsPortValue() const noexcept { return true; }
 };
 

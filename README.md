@@ -43,12 +43,49 @@ until that final cleanup completes.
 REST collections start at `/api/v1/components`. Component and nested service
 descriptions list properties, attributes, operations, and ports with canonical
 RTT type schemas. GET reads a value, PUT replaces a writable value, and POST
-invokes an operation or stages one input sample in a transport channel. The
-component acquires that sample at its next cyclic input boundary. Every output
-exposes a latest-value route backed by its committed snapshot; edits to an output
-working image remain invisible until the component completes a successful cycle.
-Multiple clients can read independently. RTT 3.0 or newer is required. Request and response limits are enforced without
-truncating values.
+invokes an operation or stages one explicitly enabled input sample. Publication
+adds no port connection: already-connected and running components remain
+observable. Both directions expose `/ports/P/latest`. Input reads show the last
+component-acquired image, including configured defaults; output reads show the
+last committed value and report `hasSample: false` before the first commit.
+An output working-image edit and an input producer's queued sample remain
+invisible until their respective component boundaries. Multiple clients read
+independent frozen snapshots. RTT 3.0 or newer is required. Request and response
+limits are enforced without truncating values.
+Whole-port readers retain their images when a port is removed and destroyed.
+The removed port's metadata and member routes return 404; a replacement port
+with the same name does not retarget the original publication's reader.
+
+Input writing is disabled by default. After publication, configure a stopped
+component with `server.enableInputWrite(component, "input", &error)` or an exact
+member such as `"io.input.axes[2].position"`. The same dot/index selectors are
+used by RTT expressions and connections. Output endpoints, invalid selectors,
+and regions that overlap an existing writer are rejected. Calling
+`disableInputWrite` with the same endpoint releases only that source while
+affected components are stopped. Repeated disable succeeds for a valid input;
+repeated enable reconnects a source disconnected through ordinary port management.
+Final server shutdown releases its sources through RTT's
+safe port teardown, which stops affected running owners; ordinary local
+connections are preserved.
+
+For an enabled whole input, POST `{"value": 18}` to `/ports/input/samples`.
+For an enabled `input.y`, POST the selected scalar to
+`/ports/input/members/y/samples`. Fixed indices use one percent-encoded selector
+segment, for example `/ports/input/members/axes%5B2%5D.position/samples`.
+Nested services retain their `/services/io/ports/input` prefix. These routes
+accept complete values of the selected RTT type, without numeric type conversion
+or partial-object merging. Successful writes return 204 and stage the latest
+sample for the next input acquisition; acknowledgement does not mean the
+component has consumed it.
+
+Selected member metadata and `/latest` reads are available without enabling
+writes. `/ports/input/members/y` describes that exact member's `rttType`, schema,
+`latestHref`, and writable state. Port discovery includes `memberHrefTemplate`
+and the enabled `inputWrites` regions. `samplesHref` is null unless that exact
+region is enabled, and its samples route returns 404 when disabled. Invalid
+JSON syntax returns 400; rejected sample types or shapes return 422; a
+disconnected configured source returns 503. All latest-value routes remain
+read-only.
 
 Operation timeouts return 504 without cancellation or replay. Admitted calls
 keep capacity and storage until completion, including while HTTP is stopped.

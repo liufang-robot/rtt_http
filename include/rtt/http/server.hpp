@@ -8,10 +8,10 @@ namespace RTT {
 class TaskContext;
 }
 namespace RTT::http {
-// Component lifetime is supplied by the embedding deployment. Published RTT
-// objects and their interface storage must remain valid until shutdown
-// finishes. The application must ensure safe concurrent property/attribute
-// access.
+// Component lifetime is supplied by the embedding deployment. Published
+// properties, attributes and operations must remain valid until shutdown
+// finishes; whole-port observations retain their images after port removal.
+// The application must ensure safe concurrent property/attribute access.
 class RTT_HTTP_API Server final {
 public:
   Server();
@@ -24,6 +24,14 @@ public:
   bool isRunning() const noexcept;
   std::string state() const;
   bool publishComponent(RTT::TaskContext &, std::string *error = nullptr);
+  // Publication only observes acquired input and committed output images.
+  // Configure an exact whole/member source while affected owners are stopped.
+  // Enable reconnects a disconnected source; disable is idempotent for inputs.
+  // Accepted samples are acquired at the next component input boundary.
+  bool enableInputWrite(RTT::TaskContext &, const std::string &relativeEndpoint,
+                        std::string *error = nullptr);
+  bool disableInputWrite(RTT::TaskContext &, const std::string &relativeEndpoint,
+                         std::string *error = nullptr);
   bool isPublished(const RTT::TaskContext *) const;
   std::vector<std::string> publicationDiagnostics(const std::string &) const;
   std::uint32_t pendingOperationCount() const noexcept;

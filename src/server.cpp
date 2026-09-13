@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // Include before RTT headers, whose Xenomai backend defines a read_lock macro.
 #include <httplib.h>
-#include <rtt/internal/PortDataAccess.hpp>
 
 #include "object_model.hpp"
 #include "operation_executor.hpp"
@@ -508,44 +507,45 @@ void Server::Impl::handle(const httplib::Request &request,
       result.emplace_object().emplace("value", std::move(value));
       break;
     case detail::ResourceKind::latest: {
-      const auto status = resource->binding->codec->portValue(
-          resource->output, &value, output, &failure);
-      if (status == PortValueStatus::error) {
+      // Retained readers outlive their ports. Serialize cursor refresh, then
+      // encode each request's independent frozen image outside the reader lock.
+      if (!resource->reader || !resource->reader->observation) {
+        problem(request, response, 500, "port-observation-failed");
+        return;
+      }
+      bool available;
+      DataSourcePtr snapshot;
+      {
+        std::lock_guard lock(resource->reader->mutex);
+        available = resource->reader->observation->available();
+        if (available) snapshot = resource->reader->observation->snapshot();
+      }
+      if (available && !resource->binding->codec->toJson(
+                           snapshot, &value, output, &failure)) {
         problem(request, response, 500,
                 responseOverflow(failure) ? "response-too-large"
                                           : "value-not-json-representable");
         return;
       }
       auto &object = result.emplace_object();
-      object.emplace("hasSample", status == PortValueStatus::value);
-      object.emplace("value", status == PortValueStatus::value
-                                  ? std::move(value)
-                                  : boost::json::value());
+      object.emplace("hasSample", available);
+      object.emplace("value", available ? std::move(value) : boost::json::value());
       break;
     }
     case detail::ResourceKind::samples: {
       std::lock_guard lock(resource->bridge->writer);
-      auto *port = dynamic_cast<RTT::base::OutputPortInterface *>(
-          resource->bridge->peer.get());
-      if (!port) {
-        problem(request, response, 500);
+      if (!resource->bridge->enabled) {
+        problem(request, response, 404);
         return;
       }
-      // Publish through the transport-owned anti-port. The component input
-      // image is acquired only at its owner's next cycle boundary.
-      switch (RTT::internal::PortDataAccess::publish(*port, staged)) {
-      case RTT::WriteSuccess:
-        response.status = 204;
-        break;
-      case RTT::NotConnected:
+      if (!resource->bridge->source->connected()) {
         problem(request, response, 503, "port-not-connected");
-        break;
-      case RTT::WriteFailure:
-        problem(request, response, 503, "port-write-failed");
-        break;
-      default:
-        problem(request, response, 500);
-        break;
+        return;
+      }
+      if (resource->bridge->source->stage(staged)) {
+        response.status = 204;
+      } else {
+        problem(request, response, 422, "port-sample-rejected");
       }
       return;
     }
@@ -925,6 +925,34 @@ bool Server::publishComponent(RTT::TaskContext &component, std::string *error) {
     return fail(error, exception.what());
   } catch (...) {
     return fail(error, "HTTP publication failed");
+  }
+}
+bool Server::enableInputWrite(RTT::TaskContext &component,
+                              const std::string &endpoint, std::string *error) {
+  std::lock_guard control(impl_->control);
+  std::lock_guard lock(impl_->mutex);
+  if (impl_->state != Impl::State::running || impl_->finalShutdown)
+    return fail(error, "input writing requires a running HTTP service");
+  try {
+    return impl_->model->enableInputWrite(component, endpoint, error);
+  } catch (const std::exception &exception) {
+    return fail(error, exception.what());
+  } catch (...) {
+    return fail(error, "HTTP input source configuration failed");
+  }
+}
+bool Server::disableInputWrite(RTT::TaskContext &component,
+                               const std::string &endpoint, std::string *error) {
+  std::lock_guard control(impl_->control);
+  std::lock_guard lock(impl_->mutex);
+  if (impl_->state != Impl::State::running || impl_->finalShutdown)
+    return fail(error, "input writing requires a running HTTP service");
+  try {
+    return impl_->model->disableInputWrite(component, endpoint, error);
+  } catch (const std::exception &exception) {
+    return fail(error, exception.what());
+  } catch (...) {
+    return fail(error, "HTTP input source release failed");
   }
 }
 bool Server::isPublished(const RTT::TaskContext *component) const {
