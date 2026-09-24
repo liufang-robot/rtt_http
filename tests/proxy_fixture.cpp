@@ -2,10 +2,11 @@
 #include <iostream>
 #include <rtt/Service.hpp>
 #include <rtt/TaskContext.hpp>
+#include <rtt/os/main.h>
 #include <rtt/http/server.hpp>
 #include <rtt/typekit/RealTimeTypekit.hpp>
 
-int main(int argc, char **argv) {
+int ORO_main(int argc, char **argv) {
   try {
     if (argc != 2) {
       return 2;

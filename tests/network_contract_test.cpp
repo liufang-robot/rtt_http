@@ -4,6 +4,7 @@
 #include <iostream>
 #include <memory>
 #include <rtt/TaskContext.hpp>
+#include <rtt/os/main.h>
 #include <rtt/http/server.hpp>
 #include <rtt/typekit/RealTimeTypekit.hpp>
 #include <thread>
@@ -142,7 +143,7 @@ void exercise(bool tls) {
 }
 } // namespace
 
-int main() {
+int ORO_main(int, char **) {
   try {
     RTT::types::RealTimeTypekitPlugin().loadTypes();
 #ifndef _WIN32

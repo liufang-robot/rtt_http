@@ -8,6 +8,7 @@
 #include <rtt/Activity.hpp>
 #include <rtt/InputPort.hpp>
 #include <rtt/TaskContext.hpp>
+#include <rtt/os/main.h>
 #include <rtt/http/server.hpp>
 #include <rtt/http/typed_codec.hpp>
 #include <rtt/typekit/RealTimeTypekit.hpp>
@@ -112,7 +113,7 @@ std::string operation(const char *name) {
 }
 } // namespace
 
-int main() {
+int ORO_main(int, char **) {
   try {
     RTT::types::RealTimeTypekitPlugin().loadTypes();
     RTT::types::Types()->addType(
