@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include <rtt/InputPort.hpp>
+#include <rtt/os/main.h>
 #include <rtt/http/typed_codec.hpp>
 #include <rtt/typekit/RealTimeTypekit.hpp>
 #include <rtt/types/TemplateTypeInfo.hpp>
@@ -50,7 +51,7 @@ class ForeignProtocol final : public RTT::types::TypeTransporter {
   }
 };
 
-int main(int argc, char **argv) {
+int ORO_main(int argc, char **argv) {
   try {
     if (!RTT::types::Types()->type("Int32")) {
       RTT::types::RealTimeTypekitPlugin().loadTypes();

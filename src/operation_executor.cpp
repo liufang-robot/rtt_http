@@ -97,6 +97,9 @@ prepareInvocation(std::shared_ptr<Operation> operation,
 }
 
 OperationExecutor::OperationExecutor(std::uint32_t width) : width_(width) {
+  // Create the caller engine on start()'s RTT-initialized thread. Ordinary
+  // HTTP threads cannot allocate Cobalt synchronization objects.
+  RTT::internal::GlobalEngine::Instance();
   try {
     workers_.reserve(width);
     for (std::uint32_t i = 0; i < width; ++i) {
