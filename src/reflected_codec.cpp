@@ -2,6 +2,7 @@
 #include <rtt/http/reflected_codec.hpp>
 #include <rtt/types/Types.hpp>
 
+#include <exception>
 #include <optional>
 #include <set>
 
@@ -184,7 +185,7 @@ private:
 
 std::unique_ptr<TypeProtocol>
 makeReflectedTypeProtocol(RTT::types::TypeInfo *type, TypeRegistration identity,
-                          RetainedSampleReader reader, std::string *error) {
+                          RetainedSampleReader reader, std::string *error) try {
   const auto fail =
       [&](const std::string &message) -> std::unique_ptr<TypeProtocol> {
     if (error) {
@@ -263,6 +264,13 @@ makeReflectedTypeProtocol(RTT::types::TypeInfo *type, TypeRegistration identity,
     error->clear();
   }
   return std::make_unique<TypeProtocol>(std::move(identity), std::move(codec));
+} catch (const std::exception &exception) {
+  // Some typekits reject metadata probes (for example resizing a fixed Eigen
+  // vector). Keep that type unsupported without aborting discovery of others.
+  if (error) {
+    *error = std::string("RTT reflection failed: ") + exception.what();
+  }
+  return {};
 }
 
 std::map<std::string, std::string> registerReflectedTypeProtocols() {
